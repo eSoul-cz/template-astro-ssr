@@ -42,6 +42,36 @@ The read-only checks, in the order Jenkins runs them: `pnpm audit`, `pnpm eslint
 (see the `Jenkinsfile`). `pnpm audit` ignores only the advisories listed with a reason and a review date in
 `pnpm-workspace.yaml`, next to `minimumReleaseAge` and the `allowBuilds` list.
 
+## Guidelines
+
+The rules in `docs/project_guidelines/` and the block in `AGENTS.md` are rendered by `esoul-guidelines` (`esoul-guidelines.json` holds the layers,
+`esoul-guidelines.lock` what was written). The project has no PHP and no Composer dependency, so `vendor/bin/esoul-guidelines` does not exist:
+install the command in one of three ways (the same code, the commands of [eSoul-cz/guidelines](https://github.com/eSoul-cz/guidelines#repositories-without-php),
+release 0.3.x). Use **Docker in CI** (the `Guidelines` stage of the `Jenkinsfile` does) and **Composer global or the PHAR on your machine**.
+
+```sh
+# 1. Composer global (PHP 8.4+ and Composer)
+composer global require esoul-cz/guidelines
+export PATH="$(composer global config bin-dir --absolute):$PATH"   # once, e.g. in ~/.zshrc
+esoul-guidelines sync        # after a new guidelines release: composer global update esoul-cz/guidelines, then sync
+esoul-guidelines check       # read-only: exit 1 on drift (a generated block was edited) or outdated content
+
+# 2. PHAR (PHP 8.4+, no Composer)
+VERSION=0.3.2                # the release without the leading "v"
+BASE="https://github.com/eSoul-cz/guidelines/releases/download/v${VERSION}"
+curl -fsSL -O "$BASE/esoul-guidelines.phar" -O "$BASE/esoul-guidelines.phar.sha256"
+sha256sum -c esoul-guidelines.phar.sha256     # macOS: shasum -a 256 -c esoul-guidelines.phar.sha256
+chmod +x esoul-guidelines.phar
+sudo mv esoul-guidelines.phar /usr/local/bin/esoul-guidelines   # or run it without installing: php esoul-guidelines.phar sync
+
+# 3. Docker (no PHP; log in first: docker login rg.fr-par.scw.cloud); the tag is one release line, a newer tag is the update
+docker run --rm -v "$PWD:/app" -w /app --user "$(id -u):$(id -g)" rg.fr-par.scw.cloud/testing-images/esoul-guidelines:0.3 sync
+docker run --rm -v "$PWD:/app" -w /app --user "$(id -u):$(id -g)" rg.fr-par.scw.cloud/testing-images/esoul-guidelines:0.3 check
+```
+
+Run `sync` after a guidelines update and commit the result (`docs/project_guidelines/`, `AGENTS.md`, `esoul-guidelines.lock`); never edit the generated
+blocks by hand. Jenkins runs `esoul-guidelines check` and fails the build on drift or outdated content.
+
 ## Settings
 
 All settings are environment variables ([`.env.example`](.env.example) lists them with their defaults). They are validated with Zod
@@ -156,7 +186,7 @@ bind-mounted at `/app/data`, and the host NGINX proxies to it.
 - `docker-compose.yml` is for a local smoke test of the image (`docker compose up --build`); the deployed stack is rendered from the
   manifest `apps/<client>/<name>.yaml` (`shape: node-http`) of the infrastructure repository, with `SESSION_SECRET` as a secret.
 - `Jenkinsfile`: one call of `astroPipeline` in image mode with `useVerifiedBuild: false` (this image builds from source): the checks
-  (install, `pnpm audit`, ESLint, Prettier, `astro check`, Vitest, build, `pnpm verify`), then `dockerBuildMultiArch` and
+  (install, `pnpm audit`, ESLint, Prettier, `astro check`, Vitest, build, `pnpm verify`, `esoul-guidelines check` in the Docker image of the guidelines), then `dockerBuildMultiArch` and
   `deployKomodoStack` for the deploy branches. One origin (`SITE_URL`), one tag set and one stack per job.
 
 ### Host NGINX
