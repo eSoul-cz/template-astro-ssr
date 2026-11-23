@@ -1,0 +1,36 @@
+---
+import { actions, isInputError } from 'astro:actions';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { adminPath, loginPath } from '../../lib/session.ts';
+
+// The forms post to this page without JavaScript; `getActionResult` carries the outcome of the post.
+const login = Astro.getActionResult(actions.login);
+if (login && !login.error) return Astro.redirect(adminPath, 303);
+// Signing out posts here too: after it, a fresh GET (a reload must not repeat the post).
+if (Astro.getActionResult(actions.logout)) return Astro.redirect(loginPath, 303);
+
+const fields = login?.error && isInputError(login.error) ? login.error.fields : {};
+const message = login?.error && !isInputError(login.error) ? login.error.message : undefined;
+---
+
+<BaseLayout title="Sign in" noindex>
+    <h1>Sign in</h1>
+    {message && (
+        <p class="error" role="alert">
+            {message}
+        </p>
+    )}
+    <form method="POST" action={actions.login} class="stack">
+        <label>
+            E-mail
+            <input type="email" name="email" autocomplete="username" required />
+            {fields.email && <span class="error">{fields.email.join(' ')}</span>}
+        </label>
+        <label>
+            Password
+            <input type="password" name="password" autocomplete="current-password" required />
+            {fields.password && <span class="error">{fields.password.join(' ')}</span>}
+        </label>
+        <button type="submit">Sign in</button>
+    </form>
+</BaseLayout>

@@ -1,0 +1,14 @@
+.astro
+dist
+data
+node_modules
+pnpm-lock.yaml
+test-results
+playwright-report
+.pnpm-store
+esoul-guidelines.json
+# Rendered by `esoul-guidelines sync`, shared files of the eSoul template
+docs/project_guidelines
+renovate.json5
+.coderabbit.yaml
+AGENTS.md

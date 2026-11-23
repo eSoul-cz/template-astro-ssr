@@ -1,0 +1,13 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+// Rendered on demand like every page: a prerendered error page would be served by the adapter without the middleware,
+// so it would miss the security headers.
+---
+
+<BaseLayout title="Page not found" noindex>
+    <h1>Page not found</h1>
+    <p>
+        <a href="/">Back to the home page</a>
+    </p>
+</BaseLayout>

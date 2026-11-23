@@ -1,0 +1,13 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+// Rendered on demand (see 404.astro). It touches no database: the error may be the database.
+---
+
+<BaseLayout title="Something went wrong" noindex>
+    <h1>Something went wrong</h1>
+    <p class="muted">The error was logged. Try again in a moment.</p>
+    <p>
+        <a href="/">Back to the home page</a>
+    </p>
+</BaseLayout>

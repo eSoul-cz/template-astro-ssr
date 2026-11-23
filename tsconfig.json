@@ -1,0 +1,11 @@
+{
+    "extends": "astro/tsconfigs/strict",
+    "compilerOptions": {
+        // `src/server/` runs directly on Node (type stripping): only erasable syntax, relative imports with `.ts`.
+        "erasableSyntaxOnly": true,
+        "allowImportingTsExtensions": true,
+        "types": ["node"]
+    },
+    "include": [".astro/types.d.ts", "**/*"],
+    "exclude": ["dist", "node_modules", "data", "test-results", "playwright-report"]
+}

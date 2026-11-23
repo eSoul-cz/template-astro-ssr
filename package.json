@@ -1,0 +1,44 @@
+{
+    "name": "app",
+    "type": "module",
+    "version": "0.1.0",
+    "private": true,
+    "packageManager": "pnpm@12.21.0",
+    "engines": {
+        "node": ">=26"
+    },
+    "scripts": {
+        "dev": "pnpm migrate && astro dev",
+        "build": "astro build",
+        "start": "node --env-file-if-exists=.env src/server/start.ts",
+        "astro": "astro",
+        "check": "astro check",
+        "eslint": "eslint .",
+        "eslint:fix": "eslint . --fix",
+        "format": "prettier . --write",
+        "format:check": "prettier . --check",
+        "test": "vitest run",
+        "test:e2e": "playwright test",
+        "verify": "node scripts/verify-dist.mjs",
+        "migrate": "node --env-file-if-exists=.env src/server/migrate.ts",
+        "admin:create": "node --env-file-if-exists=.env src/server/admin-create.ts"
+    },
+    "dependencies": {
+        "@astrojs/node": "^11.1.14",
+        "astro": "^7.4.13"
+    },
+    "devDependencies": {
+        "@astrojs/check": "^0.9.12",
+        "@eslint/js": "^10.0.1",
+        "@playwright/test": "^1.65.1",
+        "@types/node": "^26.6.6",
+        "eslint": "^10.15.0",
+        "eslint-plugin-astro": "^3.2.1",
+        "globals": "^17.14.0",
+        "prettier": "^3.10.1",
+        "prettier-plugin-astro": "^1.1.2",
+        "typescript": "^5.9.3",
+        "typescript-eslint": "^8.73.0",
+        "vitest": "^5.1.1"
+    }
+}

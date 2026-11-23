@@ -1,0 +1,20 @@
+# Local smoke test of the production image: `docker compose up --build`, then http://localhost:4321/healthz.
+# The deployed stack is rendered from the `node-http` manifest of the infrastructure repository (port 4321, `./data`
+# bind-mounted at /app/data); this file matches that shape and is not used in production.
+services:
+    app:
+        build:
+            context: .
+            args:
+                SITE_URL: ${SITE_URL:-http://localhost:4321}
+        env_file:
+            - path: .env
+              required: false
+        environment:
+            # Inside the container the data directory is the bind mount below, whatever `.env` says for `pnpm dev`.
+            DATA_DIR: /app/data
+        ports:
+            - '127.0.0.1:4321:4321'
+        volumes:
+            - ./data:/app/data
+        stop_grace_period: 15s

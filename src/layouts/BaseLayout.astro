@@ -1,0 +1,42 @@
+---
+// Shared <head> and page frame. Pages pass `title`; the canonical link, the robots meta and the staging gate
+// (PUBLIC_NOINDEX) come from the runtime settings, so one image serves staging and production.
+import { getSettings } from '../server/Settings.ts';
+import '../styles/global.css';
+
+interface Props {
+    title: string;
+    description?: string;
+    /** Forces `noindex,nofollow` for this page (the staging gate forces it everywhere). Pages without runtime data set it. */
+    noindex?: boolean;
+}
+
+const { title, description, noindex = false } = Astro.props;
+
+// `noindex` first: a prerendered page (404, 500) is built without the runtime settings and must not read them.
+const hidden = noindex || getSettings().noindex;
+const canonical = hidden ? null : new URL(Astro.url.pathname, getSettings().siteUrl).href;
+---
+
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>{title}</title>
+        {description && <meta name="description" content={description} />}
+        <meta name="robots" content={hidden ? 'noindex,nofollow' : 'index,follow'} />
+        {canonical && <link rel="canonical" href={canonical} />}
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <meta name="generator" content={Astro.generator} />
+    </head>
+    <body>
+        <a href="#main" class="skip-link">
+            Skip to content
+        </a>
+        <slot name="bar" />
+        <main id="main">
+            <slot />
+        </main>
+    </body>
+</html>

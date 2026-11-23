@@ -1,0 +1,16 @@
+.git
+.astro
+node_modules
+dist
+data
+docs
+.env
+.env.*
+!.env.example
+test-results
+playwright-report
+.DS_Store
+.idea
+.vscode
+e2e
+tests

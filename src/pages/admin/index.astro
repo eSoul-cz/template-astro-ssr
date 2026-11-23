@@ -1,0 +1,12 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+
+// Signed in: the middleware refuses every /admin request without a session before this page runs.
+const admin = Astro.locals.admin;
+if (!admin) return Astro.redirect('/admin/login');
+---
+
+<AdminLayout title="Dashboard">
+    <h1>Dashboard</h1>
+    <p class="muted">Signed in as {admin.email}. Add the project's admin pages next to this one.</p>
+</AdminLayout>

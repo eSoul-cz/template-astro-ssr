@@ -1,0 +1,12 @@
+{
+    "name": "esoul-cz/template-astro-ssr",
+    "description": "eSoul Astro SSR application on Node (archetype B-admin): SQLite, migrations and seeds, admin sign-in, Docker image and Jenkins pipeline.",
+    "type": "project",
+    "license": "MIT",
+    "scripts": {
+        "post-create-project-cmd": [
+            "@php -r \"is_dir('.esoul') || mkdir('.esoul', 0755, true); is_file('LICENSE') && rename('LICENSE', '.esoul/template-LICENSE');\"",
+            "@composer config license proprietary"
+        ]
+    }
+}

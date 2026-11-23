@@ -1,0 +1,15 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { runtime } from '../server/runtime.ts';
+import { getSiteName } from '../server/Site.ts';
+
+const siteName = getSiteName(runtime().db);
+---
+
+<BaseLayout title={siteName} description="Astro SSR application starter.">
+    <h1>{siteName}</h1>
+    <p class="muted">It works. Replace this page; the database, migrations, seeds and the admin are wired.</p>
+    <p>
+        <a href="/admin">Admin</a>
+    </p>
+</BaseLayout>
