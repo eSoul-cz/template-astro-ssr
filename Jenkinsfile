@@ -2,6 +2,8 @@
 // libraries (`pipelines/vars/astroPipeline.txt`). It runs the checks of the Astro guideline in disposable containers (install, audit,
 // lint, format, type check, unit tests, build, `pnpm verify`, `esoul-guidelines check`), then, on the deploy branches, builds the multi-architecture image and
 // rolls it out with `deployKomodoStack`.
+// `esoul-guidelines check` runs by itself with the version recorded in `esoul-guidelines.lock` (stage `Guidelines check`; README, "Guidelines"):
+// nothing to configure here.
 //
 // Unlike the static frontends, this image has a runtime (Node, `src/server/`, `node_modules`), so its `Dockerfile` builds from source
 // (`pnpm build && pnpm verify` inside the build stage) and the pipeline does not hand it a verified `dist/`: `useVerifiedBuild: false`.
@@ -33,16 +35,6 @@ astroPipeline(
     target: 'production',
     useVerifiedBuild: false,
     checks: [test: true],
-    // The rules rendered by `esoul-guidelines` are current and unedited (README, "Guidelines"). The image of the guidelines has no PHP
-    // project around it; its entrypoint is the command itself, and the step runs `/bin/sh -c <command>`, so the entrypoint is cleared.
-    extraChecks: [
-        [
-            name: 'Guidelines',
-            image: 'rg.fr-par.scw.cloud/testing-images/esoul-guidelines:0.3',
-            options: '--entrypoint=',
-            command: 'esoul-guidelines check',
-        ],
-    ],
     // The deploy branches push `latest`; every Git tag at the commit is a tag of the image too.
     tags: ['latest'],
     deployBranches: ['main', 'master'],
