@@ -1,11 +1,12 @@
 import type { Server } from 'node:http';
 import { closeDatabase } from './Database.ts';
-import { prepareDatabaseOrExit } from './prepare.ts';
+import { migrateDatabaseOrLog } from './prepare.ts';
 import { loadSettingsOrExit } from './Settings.ts';
 
 /**
- * Production entry (`pnpm start`, the Docker image): validates the settings, runs migrations and seeds, then starts the
- * built Astro server. Any failure exits non-zero before the server listens.
+ * Production entry (`pnpm start`, the Docker image): validates the settings, applies pending migrations, then starts the
+ * built Astro server. An invalid setting exits non-zero before the server listens. A failing migration does not: it is
+ * logged loudly and the server starts anyway. The start never runs the seeds (`pnpm seed`, by hand).
  *
  * The Node adapter does not handle stop signals (its `standalone.js` only listens). So the adapter's autostart is
  * switched off, `startServer()` is called here, and on SIGTERM / SIGINT the server stops accepting connections, lets
@@ -16,7 +17,7 @@ process.env.ASTRO_NODE_AUTOSTART = 'disabled';
 const graceMs = 8_000;
 
 loadSettingsOrExit();
-prepareDatabaseOrExit();
+migrateDatabaseOrLog();
 
 // A dynamic import: the entry is build output (it does not exist while this file is type-checked) and it reads
 // ASTRO_NODE_AUTOSTART when it is loaded, so it must be imported after the assignment above.

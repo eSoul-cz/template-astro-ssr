@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -24,6 +24,10 @@ export interface StartOptions {
     /** Reuse a data directory (a restart); a new temporary one by default. */
     readonly dataDir?: string;
     readonly env?: Record<string, string>;
+    /** Run `src/server/seed.ts` before the start, like a developer does by hand (the start never seeds). Default: true. */
+    readonly seed?: boolean;
+    /** Create the admin after the start. Default: true; `false` when the schema is not expected to exist (the credentials are returned, not created). */
+    readonly admin?: boolean;
 }
 
 const freePort = () =>
@@ -56,19 +60,25 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
     const port = await freePort();
     const baseURL = `http://127.0.0.1:${port}`;
 
+    const env = {
+        PATH: process.env.PATH,
+        HOST: '127.0.0.1',
+        PORT: String(port),
+        SITE_URL: baseURL,
+        DATA_DIR: dataDir,
+        SESSION_SECRET: randomBytes(32).toString('base64url'),
+        ...options.env,
+    };
+    if (options.seed !== false) {
+        const seeded = spawnSync(process.execPath, ['src/server/seed.ts'], { env, encoding: 'utf8' });
+        if (seeded.status !== 0) {
+            if (!options.dataDir) rmSync(dataDir, { recursive: true, force: true });
+            throw new Error(`The seed script exited with ${seeded.status}:\n${seeded.stdout}${seeded.stderr}`);
+        }
+    }
+
     let log = '';
-    const child = spawn(process.execPath, ['src/server/start.ts'], {
-        env: {
-            PATH: process.env.PATH,
-            HOST: '127.0.0.1',
-            PORT: String(port),
-            SITE_URL: baseURL,
-            DATA_DIR: dataDir,
-            SESSION_SECRET: randomBytes(32).toString('base64url'),
-            ...options.env,
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = spawn(process.execPath, ['src/server/start.ts'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', (chunk) => (log += chunk));
     child.stderr.on('data', (chunk) => (log += chunk));
     const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
@@ -82,12 +92,14 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
 
     // The migrations have run: create the admin the way `pnpm admin:create` does, with the server's own module.
     const admin = { email: 'e2e-admin@example.com', password: randomBytes(18).toString('base64url') };
-    const db = openDatabase(join(dataDir, 'app.db'));
-    try {
-        if (!db.prepare('SELECT 1 FROM admins WHERE email = ?').get(admin.email)) await createAdmin(db, admin.email, admin.password);
-    } finally {
-        db.close();
-        closeDatabase();
+    if (options.admin !== false) {
+        const db = openDatabase(join(dataDir, 'app.db'));
+        try {
+            if (!db.prepare('SELECT 1 FROM admins WHERE email = ?').get(admin.email)) await createAdmin(db, admin.email, admin.password);
+        } finally {
+            db.close();
+            closeDatabase();
+        }
     }
 
     return {

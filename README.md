@@ -30,19 +30,20 @@ pnpm admin:create you@example.com          # asks for a password (12+ characters
 pnpm dev                                   # http://localhost:4321, admin at /admin
 ```
 
-| Script                         | What it does                                                                                                   |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `pnpm dev`                     | `pnpm migrate`, then the Astro dev server (the CSP is only active in `build` + `pnpm start`)                   |
-| `pnpm build`                   | `astro build` into `dist/` (`dist/server`, `dist/client`)                                                      |
-| `pnpm start`                   | Production entry: validates the settings, runs migrations and seeds, starts the built server, stops on SIGTERM |
-| `pnpm migrate`                 | Validates the settings, runs migrations and seeds, exits                                                       |
-| `pnpm admin:create <email>`    | Creates an admin (password prompt, or stdin when piped); `--reset` sets a new password and ends the sessions   |
-| `pnpm check`                   | `astro check` (TypeScript and Astro diagnostics)                                                               |
-| `pnpm eslint` / `eslint:fix`   | ESLint (read-only / autofix)                                                                                   |
-| `pnpm format:check` / `format` | Prettier (read-only / write)                                                                                   |
-| `pnpm test`                    | Vitest: migrations, seeds, settings, passwords, sessions, login throttle (`tests/`)                            |
-| `pnpm verify`                  | Checks the build output (`scripts/verify-dist.mjs`)                                                            |
-| `pnpm test:e2e`                | Playwright against the built server (`pnpm build` first); every spec file starts its own server                |
+| Script                         | What it does                                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `pnpm dev`                     | `pnpm migrate` and `pnpm seed`, then the Astro dev server (the CSP is only active in `build` + `pnpm start`) |
+| `pnpm build`                   | `astro build` into `dist/` (`dist/server`, `dist/client`)                                                    |
+| `pnpm start`                   | Production entry: validates the settings, applies migrations, starts the built server, stops on SIGTERM      |
+| `pnpm migrate`                 | Validates the settings, applies pending migrations, exits                                                    |
+| `pnpm seed`                    | Validates the settings, applies pending migrations, runs the seeds that never ran, exits (by hand only)      |
+| `pnpm admin:create <email>`    | Creates an admin (password prompt, or stdin when piped); `--reset` sets a new password and ends the sessions |
+| `pnpm check`                   | `astro check` (TypeScript and Astro diagnostics)                                                             |
+| `pnpm eslint` / `eslint:fix`   | ESLint (read-only / autofix)                                                                                 |
+| `pnpm format:check` / `format` | Prettier (read-only / write)                                                                                 |
+| `pnpm test`                    | Vitest: migrations, seeds, settings, passwords, sessions, login throttle (`tests/`)                          |
+| `pnpm verify`                  | Checks the build output (`scripts/verify-dist.mjs`)                                                          |
+| `pnpm test:e2e`                | Playwright against the built server (`pnpm build` first); every spec file starts its own server              |
 
 The read-only checks, in the order Jenkins runs them: `pnpm audit`, `pnpm eslint`, `pnpm format:check`, `pnpm check`, `pnpm test`,
 `pnpm build`, `pnpm verify`; `pnpm test:e2e` runs locally (`pnpm build` first), the pipeline runs it only in a pinned Playwright image
@@ -139,10 +140,14 @@ fetched outside the middleware.
 
 ## Migrations and seeds
 
-Both live in `src/server/` and run before the server listens; a failure exits the process (the container) instead of serving errors.
+Both live in `src/server/` and are applied by `src/server/prepare.ts`. The start (`pnpm start`, the image) applies **migrations only**:
+a failing migration does not block the deployment, it is logged as `MIGRATION FAILED` and the server starts anyway, so whoever monitors
+the deployment reads the log and decides (fix forward or roll back). **The start never runs the seeds.** Seeding is a deliberate act of
+a developer, by hand: `pnpm seed` locally (`pnpm dev` runs it), `docker compose exec -u app app node src/server/seed.ts` in a deployed
+container.
 
 - **Migrations**: `src/server/migrations/<id>_<name>.ts`, registered in `migrations/index.ts`, the one place. Forward-only, each in a
-  transaction with its row in `migrations`. **The start fails when a registered migration has an id below the latest applied one and
+  transaction with its row in `migrations`. **The migration run fails when a registered migration has an id below the latest applied one and
   never ran** (two branches picked ids in parallel): a migration from a parallel branch takes an id **above everything merged**, and
   once a migration is merged it is never edited, only followed by a new one. Migrations must be safe while the previous release still
   serves requests, because only then can a deploy roll back.
@@ -186,7 +191,8 @@ bind-mounted at `/app/data`, and the host NGINX proxies to it.
   the adapter's autostart off (`ASTRO_NODE_AUTOSTART=disabled`), starts the server itself and on `SIGTERM`/`SIGINT` stops accepting,
   lets in-flight requests finish (idle connections are closed at once, the rest after 8 s), closes the database and exits **0**
   (`e2e/app.spec.ts` checks the exit code; `docker stop` returns within a second on an idle container).
-- **Settings, migrations and seeds run before the server listens**; an invalid setting or a failing migration exits the container.
+- **Settings are validated before the server listens**; an invalid setting exits the container. Migrations run next and a failing
+  migration is logged and does not stop it ([Migrations and seeds](#migrations-and-seeds)). The start does not seed.
 - **Client files.** The deploy hook of the stack copies `/app/dist/client` out of the image into `./client` for NGINX
   (`docker cp`). Where there is no such hook, set `CLIENT_COPY_DIR` (for example `/app/client-out`, bind-mounted from the host): the
   entrypoint copies `dist/client` there on every start, so a new image never leaves the old files behind.
@@ -234,7 +240,7 @@ database are never routed, `/healthz` MAY be public.
 ```
 astro.config.mjs        adapter, CSP, allowed domains, body limits
 src/server/             plain Node TypeScript, no astro:* imports: Settings, Database, Migrator, Seeds, Auth, Sessions,
-                        LoginThrottle, Password, runtime (+ start.ts, migrate.ts, admin-create.ts scripts)
+                        LoginThrottle, Password, runtime (+ start.ts, migrate.ts, seed.ts, admin-create.ts scripts)
 src/server/migrations/  numbered migrations and their index      src/server/seeds/  run-once seeds and their index
 src/middleware.ts       headers, body limit, session lookup, admin guard
 src/actions/            login, logout                             src/lib/  routes, session cookie helpers (use astro:*)

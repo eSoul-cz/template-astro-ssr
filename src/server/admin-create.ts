@@ -1,6 +1,6 @@
 import { AuthError, createAdmin, resetAdminPassword } from './Auth.ts';
 import { closeDatabase } from './Database.ts';
-import { prepareDatabaseOrExit } from './prepare.ts';
+import { migrateDatabaseOrExit } from './prepare.ts';
 import { loadSettingsOrExit } from './Settings.ts';
 
 /**
@@ -69,7 +69,7 @@ async function readPassword(): Promise<string> {
 loadSettingsOrExit();
 try {
     const password = await readPassword();
-    const db = prepareDatabaseOrExit();
+    const db = migrateDatabaseOrExit();
     if (reset) {
         await resetAdminPassword(db, email, password);
         console.log(`Password of ${email.trim().toLowerCase()} changed, its sessions ended`);

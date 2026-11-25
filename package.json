@@ -8,7 +8,7 @@
         "node": ">=26"
     },
     "scripts": {
-        "dev": "pnpm migrate && astro dev",
+        "dev": "pnpm migrate && pnpm seed && astro dev",
         "build": "astro build",
         "start": "node --env-file-if-exists=.env src/server/start.ts",
         "astro": "astro",
@@ -21,6 +21,7 @@
         "test:e2e": "playwright test",
         "verify": "node scripts/verify-dist.mjs",
         "migrate": "node --env-file-if-exists=.env src/server/migrate.ts",
+        "seed": "node --env-file-if-exists=.env src/server/seed.ts",
         "admin:create": "node --env-file-if-exists=.env src/server/admin-create.ts"
     },
     "dependencies": {

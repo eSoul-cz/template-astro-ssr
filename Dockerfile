@@ -34,7 +34,7 @@ ENV NODE_ENV=production HOST=0.0.0.0 PORT=4321 SITE_URL=${SITE_URL}
 WORKDIR /app
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# The scripts of `src/server/` run directly on Node (no build step): start, migrate, admin:create.
+# The scripts of `src/server/` run directly on Node (no build step): start, migrate, seed, admin:create.
 COPY package.json ./
 COPY src/server ./src/server
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/
@@ -45,5 +45,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD ["node", "-e", "fetch(`http://127.0.0.1:${process.env.PORT}/healthz`).then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 # `-g`: stop signals reach the whole process group. The container starts as root only for the entrypoint (see there).
 ENTRYPOINT ["tini", "-g", "--", "docker-entrypoint.sh"]
-# Validates the settings, runs migrations and seeds, then listens; any failure exits the container.
+# Validates the settings (invalid: exit), applies pending migrations (a failure is logged, the server starts anyway) and
+# listens. It never seeds: `docker compose exec -u app app node src/server/seed.ts` is a deliberate act.
 CMD ["node", "src/server/start.ts"]

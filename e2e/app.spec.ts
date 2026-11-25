@@ -1,4 +1,7 @@
 import { expect, test as base } from '@playwright/test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openDatabase } from '../src/server/Database.ts';
 import { startApp, type App } from './app.ts';
 
@@ -161,9 +164,8 @@ test.describe('process', () => {
         }
     });
 
-    test('SIGTERM stops the server gracefully with exit code 0, and a restart does not run the seeds again', async () => {
+    test('SIGTERM stops the server gracefully with exit code 0, and a restart keeps what the client edited', async () => {
         const first = await startApp();
-        expect(first.output()).toContain('Seed 0001_site_name ran');
         // The client edits seeded data...
         const db = openDatabase(`${first.dataDir}/app.db`);
         db.prepare("UPDATE site_settings SET value = 'Edited by the client' WHERE key = 'site_name'").run();
@@ -172,7 +174,7 @@ test.describe('process', () => {
         expect(await first.stop()).toBe(0);
         expect(first.output()).toContain('SIGTERM received');
 
-        // ...and the next start keeps it: migrations and seeds that ran are never repeated.
+        // ...and the next start (and a second `pnpm seed`) keeps it: migrations and seeds that ran are never repeated.
         const second = await startApp({ dataDir: first.dataDir });
         try {
             expect(second.output()).not.toContain('Seed ');
@@ -184,7 +186,37 @@ test.describe('process', () => {
         }
     });
 
+    test('the start applies the migrations and never runs the seeds', async () => {
+        const app = await startApp({ seed: false });
+        try {
+            expect(app.output()).toContain('Migration ');
+            expect(app.output()).not.toContain('Seed ');
+            expect(await (await fetch(`${app.baseURL}/llms.txt`)).text()).not.toContain('# Example');
+            expect(await app.stop()).toBe(0);
+        } finally {
+            app.cleanup();
+        }
+    });
+
+    test('a failing migration is logged loudly and does not stop the server', async () => {
+        // A migration that was applied from a "future" branch makes the registered ones below it a failing run.
+        const dataDir = mkdtempSync(join(tmpdir(), 'app-e2e-'));
+        const db = openDatabase(join(dataDir, 'app.db'));
+        db.exec('CREATE TABLE migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)');
+        db.prepare('INSERT INTO migrations (id, name, applied_at) VALUES (?, ?, ?)').run(9999, 'from_the_future', 0);
+        db.close();
+
+        const app = await startApp({ dataDir, seed: false, admin: false });
+        try {
+            expect(app.output()).toContain('MIGRATION FAILED');
+            expect((await fetch(`${app.baseURL}/healthz`)).ok).toBe(true);
+            expect(await app.stop()).toBe(0);
+        } finally {
+            app.cleanup();
+        }
+    });
+
     test('an invalid setting stops the start before the server listens', async () => {
-        await expect(startApp({ env: { SESSION_SECRET: 'short' } })).rejects.toThrow(/exited with 1[\s\S]*SESSION_SECRET/);
+        await expect(startApp({ seed: false, env: { SESSION_SECRET: 'short' } })).rejects.toThrow(/exited with 1[\s\S]*SESSION_SECRET/);
     });
 });
