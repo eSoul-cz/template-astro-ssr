@@ -1,0 +1,175 @@
+---
+import { actions } from 'astro:actions';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { listRedirects } from '../../server/Redirects.ts';
+import type { FromIssue, ToIssue } from '../../server/redirect-input.ts';
+import { redirectLimits } from '../../server/redirect-input.ts';
+import { runtime } from '../../server/runtime.ts';
+
+// The admin pages need a session (the middleware refuses the request without one, the actions check it again).
+const admin = Astro.locals.admin;
+if (!admin) return Astro.redirect('/admin/login');
+
+const pagePath = '/admin/redirects';
+// A save or a removal posts here without JavaScript; after a success a fresh GET (a reload must not repeat the post).
+const saved = Astro.getActionResult(actions.redirects.save);
+const removed = Astro.getActionResult(actions.redirects.remove);
+if ((saved?.data && saved.data.status === 'saved') || removed?.data) return Astro.redirect(pagePath, 303);
+
+const redirects = listRedirects(runtime().db);
+const outcome = saved?.data && saved.data.status === 'invalid' ? saved.data : undefined;
+const editedId = outcome ? outcome.values.id : Number(Astro.url.searchParams.get('edit')) || undefined;
+const edited = redirects.find((redirect) => redirect.id === editedId);
+const missing = saved?.data?.status === 'notFound' || (editedId !== undefined && !edited && !outcome);
+const values = outcome?.values ?? {
+    from: edited?.from ?? '',
+    to: edited?.to ?? '',
+    status: edited?.status ?? 301,
+};
+
+const fromMessages: Record<FromIssue, string> = {
+    required: 'Enter the old address.',
+    invalid: 'This is not an address of this site (a path such as /old-page, optionally ending in * for a prefix).',
+    tooLong: `At most ${redirectLimits.path} characters.`,
+    reserved: 'The application serves this address itself.',
+    taken: 'Another redirect already starts at this address.',
+    pointedAt: 'Other redirects lead to this address, so it is a live page as far as the admin knows. Change them first:',
+};
+const toMessages: Record<ToIssue, string> = {
+    required: 'Enter the new address.',
+    invalid: 'Use an address of this site, starting with / (never another site).',
+    query: 'The new address must not contain ? or #: the visitor’s query string is added automatically.',
+    tooLong: `At most ${redirectLimits.path} characters.`,
+    same: 'The new address equals the old one.',
+    chain: 'The new address is itself redirected. Point to the final address.',
+    loop: 'This would redirect in a circle.',
+};
+const issues = outcome?.issues ?? {};
+const fromMessage = issues.from ? fromMessages[issues.from] : undefined;
+const toMessage = issues.to ? toMessages[issues.to] : undefined;
+const time = (at: number | null) => (at === null ? '' : new Date(at).toISOString().slice(0, 16).replace('T', ' '));
+---
+
+<AdminLayout title="Redirects">
+    <h1>Redirects</h1>
+    <p class="muted">
+        Old addresses of the previous site. A redirect applies only where this site has no page. 301 sends the visitor to the new address, 410 says
+        the page is gone for good. A trailing <code>*</code> makes a prefix rule (<code>/old/*</code>); the exact address wins over a prefix rule.
+    </p>
+    {missing && (
+        <p class="error" role="alert">
+            This redirect no longer exists.
+        </p>
+    )}
+    {(saved?.error || removed?.error) && (
+        <p class="error" role="alert">
+            The request was refused. Reload the page and try again.
+        </p>
+    )}
+
+    <form method="POST" action={`${pagePath}${actions.redirects.save}`} class="stack" aria-label={edited ? 'Edit redirect' : 'Add redirect'}>
+        <h2>{edited ? 'Edit redirect' : 'Add redirect'}</h2>
+        {edited && <input type="hidden" name="id" value={edited.id} />}
+        <label>
+            Old address
+            <input name="from" value={values.from} placeholder="/old-page" required maxlength="1000" />
+            {fromMessage && (
+                <span class="error">
+                    {fromMessage}
+                    {outcome?.pointedAt.length ? ` ${outcome.pointedAt.join(', ')}` : ''}
+                </span>
+            )}
+        </label>
+        <label>
+            New address
+            <input name="to" value={values.to} placeholder="/new-page" maxlength="1000" />
+            {toMessage && <span class="error">{toMessage}</span>}
+        </label>
+        <label>
+            Answer
+            <select name="status">
+                <option value="301" selected={values.status === 301}>
+                    301 redirect to the new address
+                </option>
+                <option value="410" selected={values.status === 410}>
+                    410 gone (the new address is ignored)
+                </option>
+            </select>
+        </label>
+        <button type="submit">{edited ? 'Save' : 'Add'}</button>
+        {edited && <a href={pagePath}>Cancel</a>}
+    </form>
+
+    <h2>All redirects</h2>
+    {redirects.length === 0 ? (
+        <p class="muted">None yet.</p>
+    ) : (
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th scope="col">Old address</th>
+                        <th scope="col">Answer</th>
+                        <th scope="col">New address</th>
+                        <th scope="col">Hits</th>
+                        <th scope="col">Last hit (UTC)</th>
+                        <th scope="col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {redirects.map((redirect) => (
+                        <tr>
+                            <td>
+                                <code>{redirect.from}</code>
+                            </td>
+                            <td>{redirect.status}</td>
+                            <td>{redirect.to ? <code>{redirect.to}</code> : ''}</td>
+                            <td>{redirect.hits}</td>
+                            <td>{time(redirect.lastHitAt)}</td>
+                            <td class="row-actions">
+                                <a href={`${pagePath}?edit=${redirect.id}`} aria-label={`Edit ${redirect.from}`}>
+                                    Edit
+                                </a>
+                                <form method="POST" action={`${pagePath}${actions.redirects.remove}`}>
+                                    <input type="hidden" name="id" value={redirect.id} />
+                                    <button type="submit" aria-label={`Delete ${redirect.from}`}>
+                                        Delete
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    )}
+</AdminLayout>
+
+<style>
+    .table-wrap {
+        overflow-x: auto;
+    }
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow-wrap: anywhere;
+    }
+    th,
+    td {
+        text-align: left;
+        padding: 0.5rem;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+    }
+    .row-actions,
+    .row-actions form {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        margin: 0;
+    }
+    select {
+        font: inherit;
+        padding: 0.5rem 0.75rem;
+    }
+</style>

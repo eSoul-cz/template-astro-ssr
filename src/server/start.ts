@@ -1,6 +1,7 @@
 import type { Server } from 'node:http';
-import { closeDatabase } from './Database.ts';
+import { closeDatabase, getDatabase } from './Database.ts';
 import { migrateDatabaseOrLog } from './prepare.ts';
+import { flushRedirectHits } from './Redirects.ts';
 import { loadSettingsOrExit } from './Settings.ts';
 
 /**
@@ -32,6 +33,7 @@ const stop = (signal: string) => {
     console.log(`${signal} received, stopping`);
     setTimeout(() => http.closeAllConnections(), graceMs).unref();
     http.close(() => {
+        flushRedirectHits(getDatabase());
         closeDatabase();
         process.exit(0);
     });

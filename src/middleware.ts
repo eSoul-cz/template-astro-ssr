@@ -1,6 +1,9 @@
 import type { APIContext, MiddlewareNext } from 'astro';
 import { defineMiddleware } from 'astro:middleware';
 import { adminPath, loginPath, sessionAdmin } from './lib/session.ts';
+import { isReservedPath } from './server/redirect-input.ts';
+import { recordRedirectHit, resolveRedirect, type ResolvedRedirect } from './server/Redirects.ts';
+import { runtime } from './server/runtime.ts';
 
 /** Nothing in this template uploads files: a request body is a small form. Larger ones are refused before they are read. */
 const maxBodyBytes = 64 * 1024;
@@ -41,16 +44,56 @@ function withHeaders(response: Response, headers: Record<string, string>): Respo
     }
 }
 
-/** Session lookup, and the admin gate: every `/admin` page but the sign-in page needs a session. */
+/**
+ * The redirect row for an address, or nothing; a failing lookup never turns a 404 into a 500. The admin and the
+ * application's own endpoints have none.
+ */
+function findRedirect(path: string): ResolvedRedirect | undefined {
+    if (isReservedPath(path)) return undefined;
+    try {
+        return resolveRedirect(runtime().db, path);
+    } catch (error) {
+        console.error(`Looking up a redirect for ${path} failed: ${String(error)}`);
+        return undefined;
+    }
+}
+
+/**
+ * Answers a request that would end in 404 with its redirect row: a 301 to the target (the query string goes along), a 410
+ * with the 404 page. A dynamic route answers its 404 without a body, so the page is rendered here, whatever the route
+ * returned. The use is counted in memory, never waited for.
+ */
+async function answerWithRedirect(context: APIContext, rule: ResolvedRedirect): Promise<Response> {
+    if (context.request.method === 'GET') {
+        try {
+            recordRedirectHit(runtime().db, rule.from);
+        } catch (error) {
+            console.error(`Counting a redirect hit failed: ${String(error)}`);
+        }
+    }
+    if (rule.status === 301 && rule.to !== null) return context.redirect(`${encodeURI(rule.to)}${context.url.search}`, 301);
+    const page = await context.rewrite('/404');
+    const headers = new Headers(page.headers);
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'text/html');
+    return new Response(page.body, { status: 410, statusText: 'Gone', headers });
+}
+
+/** Session lookup, the admin gate (every `/admin` page but the sign-in page needs a session) and the redirects of old addresses. */
 async function guard(context: APIContext, next: MiddlewareNext): Promise<Response> {
     const { pathname } = context.url;
     if (pathname === '/healthz') return next();
 
     const admin = sessionAdmin(context.cookies);
     context.locals.admin = admin;
-    if (!isAdminPath(pathname)) return next();
-
     const isSafe = context.request.method === 'GET' || context.request.method === 'HEAD';
+    if (!isAdminPath(pathname)) {
+        // A redirect row applies only where the site has no page: the response must be a 404 first.
+        const response = await next();
+        if (!isSafe || response.status !== 404) return response;
+        // The raw path: Astro has decoded `pathname` already, and the lookup decodes once itself (a literal `%` would fail twice).
+        const rule = findRedirect(new URL(context.request.url).pathname);
+        return rule ? answerWithRedirect(context, rule) : response;
+    }
     if (trimSlash(pathname) === loginPath) return admin && isSafe ? context.redirect(adminPath) : next();
     return admin ? next() : context.redirect(loginPath, isSafe ? 302 : 303);
 }

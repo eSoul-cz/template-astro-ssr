@@ -64,6 +64,6 @@ describe('runMigrations', () => {
     it('applies the registered migrations of the template to an empty database', () => {
         const db = memoryDatabase();
         runMigrations(db, migrations, quiet);
-        expect(tableNames(db)).toEqual(expect.arrayContaining(['admins', 'sessions', 'site_settings', 'migrations']));
+        expect(tableNames(db)).toEqual(expect.arrayContaining(['admins', 'sessions', 'site_settings', 'redirects', 'migrations']));
     });
 });

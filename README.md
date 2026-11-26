@@ -41,7 +41,7 @@ pnpm dev                                   # http://localhost:4321, admin at /ad
 | `pnpm check`                   | `astro check` (TypeScript and Astro diagnostics)                                                             |
 | `pnpm eslint` / `eslint:fix`   | ESLint (read-only / autofix)                                                                                 |
 | `pnpm format:check` / `format` | Prettier (read-only / write)                                                                                 |
-| `pnpm test`                    | Vitest: migrations, seeds, settings, passwords, sessions, login throttle (`tests/`)                          |
+| `pnpm test`                    | Vitest: migrations, seeds, settings, passwords, sessions, login throttle, redirects (`tests/`)               |
 | `pnpm verify`                  | Checks the build output (`scripts/verify-dist.mjs`)                                                          |
 | `pnpm test:e2e`                | Playwright against the built server (`pnpm build` first); every spec file starts its own server              |
 
@@ -158,16 +158,55 @@ container.
 `src/server/` is plain Node TypeScript with no `astro:*` imports, so `node src/server/migrate.ts` and the other scripts run it directly
 (Node strips the types; only erasable syntax and relative imports with the `.ts` extension, enforced by `tsconfig.json`).
 
+## Redirects
+
+The old addresses of a previous site are rows of the `redirects` table (migration `0002_redirects`), edited by an admin at
+`/admin/redirects`: an old address, a new one and an answer, `301` (moved) or `410` (gone for good, no new address). A trailing `*`
+makes a prefix rule (`/old/*`); the exact address wins, then the longest prefix. A static site (`astro-static`) keeps its redirects in NGINX instead.
+
+- **A redirect never hides a page.** The middleware looks a row up only when the response of a `GET` or `HEAD` is a 404. A `301` keeps the
+  query string; a `410` renders the 404 page with the status 410 (`text/html`). `/admin`, `/healthz` and the application's own endpoints
+  have no redirects.
+- **One form of a path.** `normalizePath` (`src/server/redirect-input.ts`) turns what an admin types and what a request asks for into the same
+  canonical path: leading `/`, no query or hash, decoded, and the trailing slash of `trailingSlash` in `astro.config.mjs` (a test fails
+  when the constant `trailingSlash` there differs from the config; with `always`, set it to `'always'` and the paths end in `/`).
+  The target must be a path of this site: another site, `//host`, backslashes and control characters are refused, and so are a redirect to
+  itself, a chain (the target is itself redirected), a loop, and an address that other rows point at (the form lists those rows).
+- **No rows in the template.** A project adds the redirects of its old site as its own migration, registered in `migrations/index.ts` (never
+  edit it after the first deploy, add a new one). `checkRedirect` gives the canonical form and refuses what a save would refuse, so the
+  migration throws on a typo; `INSERT OR IGNORE` keeps a row the admin already has. A row that is not canonical (written by raw SQL) is
+  skipped by the lookup and logged, so it can never become an open redirect:
+
+    ```ts
+    const initial: ReadonlyArray<readonly [from: string, to: string | null]> = [
+        ['/about-us', '/about'],
+        ['/wp-content/*', null], // gone for good
+    ];
+    // in up(db), with `import { checkRedirect } from '../redirect-input.ts'`:
+    const insert = db.prepare('INSERT OR IGNORE INTO redirects (from_path, to_path, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
+    for (const [from, to] of initial) {
+        const checked = checkRedirect({ from, to: to ?? '', status: to === null ? 410 : 301 });
+        if (checked.issues) throw new Error(`Redirect ${from}: ${JSON.stringify(checked.issues)}`);
+        insert.run(checked.value.from, checked.value.to, checked.value.status, Date.now(), Date.now());
+    }
+    ```
+
+- **When a slug changes**, call `recordSlugChange(db, oldPath, newPath)` (`src/server/Redirects.ts`) where the project saves it: the old address
+  redirects to the new one, the rows that led to the old one follow, and a row from the new address is removed. It joins the caller's transaction.
+- **Memory.** The rules are cached per process and dropped by every write made through `Redirects.ts` (a row written by raw SQL after the first
+  lookup is not seen until the process restarts). The lookup uses the path as the browser sent it, decoded once. Hits are counted in memory, written every 10 s in one transaction and on SIGTERM
+  (`start.ts`); a killed process loses the last seconds, and a counting failure never reaches a response.
+
 ## Pages, actions, middleware
 
 - `src/pages/index.astro` home, `404.astro`, `500.astro`, `admin/index.astro` (admin shell: `AdminLayout` with navigation and sign-out),
-  `admin/login.astro`. All pages are rendered on demand, the error pages too: the adapter serves a prerendered page without the
+  `admin/login.astro`, `admin/redirects.astro` (the redirects of old addresses, see [Redirects](#redirects)). All pages are rendered on demand, the error pages too: the adapter serves a prerendered page without the
   middleware, so it would miss the security headers.
-- `src/actions/index.ts`: `login` and `logout` are Astro Actions with `accept: 'form'`, so a plain `<form method="post">` works without
+- `src/actions/index.ts`: `login`, `logout` and `redirects.save` / `redirects.remove` are Astro Actions with `accept: 'form'`, so a plain `<form method="post">` works without
   JavaScript and the page renders the result from `Astro.getActionResult()`. Login and logout post to `/admin/login`.
 - `src/middleware.ts`: security headers (`nosniff`, `Referrer-Policy`, `X-Frame-Options`, `Permissions-Policy`), a 64 KB body limit
   (`413`, `411` for a body of unknown length; the adapter and `security.actionBodySizeLimit` use the same limit), `Cache-Control:
-private, no-store` on `/admin` and on action responses, the session lookup into `Astro.locals.admin` and the guard of `/admin`.
+private, no-store` on `/admin` and on action responses, the session lookup into `Astro.locals.admin`, the guard of `/admin` and the redirects of old addresses.
 - The **Content-Security-Policy** is Astro's `security.csp` (`astro.config.mjs`): on-demand pages get it as a header with hashes for
   their scripts and styles and `frame-ancestors 'none'`, so no `unsafe-inline` is needed. A page with `prerender = true` gets a `<meta>`
   tag instead, where `frame-ancestors` is ignored (the browser logs a notice), and the adapter serves such a file without the
@@ -240,10 +279,10 @@ database are never routed, `/healthz` MAY be public.
 ```
 astro.config.mjs        adapter, CSP, allowed domains, body limits
 src/server/             plain Node TypeScript, no astro:* imports: Settings, Database, Migrator, Seeds, Auth, Sessions,
-                        LoginThrottle, Password, runtime (+ start.ts, migrate.ts, seed.ts, admin-create.ts scripts)
+                        LoginThrottle, Password, Redirects, redirect-input, runtime (+ start.ts, migrate.ts, seed.ts, admin-create.ts scripts)
 src/server/migrations/  numbered migrations and their index      src/server/seeds/  run-once seeds and their index
-src/middleware.ts       headers, body limit, session lookup, admin guard
-src/actions/            login, logout                             src/lib/  routes, session cookie helpers (use astro:*)
+src/middleware.ts       headers, body limit, session lookup, admin guard, redirects of old addresses
+src/actions/            login, logout, redirects                             src/lib/  routes, session cookie helpers (use astro:*)
 src/pages/              pages, endpoints (healthz, robots.txt, sitemap.xml, llms.txt)
 tests/                  Vitest                                    e2e/      Playwright (starts the built server itself)
 scripts/verify-dist.mjs build output checks                       Dockerfile, docker-entrypoint.sh, docker-compose.yml, Jenkinsfile
